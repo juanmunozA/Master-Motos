@@ -1829,12 +1829,10 @@ function Sidebar({ activeView, collapsed, setCollapsed, showView, role, authDisp
       <div className="sidebar-footer">
         {onLogout && (
           <div className="sidebar-account">
-            {!collapsed && (
-              <div className="sidebar-account-info">
-                <span className="sidebar-avatar">{(authDisplayName || "?").charAt(0).toUpperCase()}</span>
-                <span className="sidebar-account-name">{authDisplayName}</span>
-              </div>
-            )}
+            <div className="sidebar-account-info">
+              <span className="sidebar-avatar">{(authDisplayName || "?").charAt(0).toUpperCase()}</span>
+              <span className="sidebar-account-name">{authDisplayName}</span>
+            </div>
             <button
               aria-label="Cerrar sesion"
               className="sidebar-logout"
