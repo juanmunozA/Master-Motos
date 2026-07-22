@@ -4082,3 +4082,166 @@ input[readonly],
 .payment-method-stats .stat-card {
   min-height: 0;
 }
+
+/* ============================================================
+   Mobile layout (phones). Appended last on purpose: this file has
+   many duplicated/conflicting rules earlier on, and a rule here
+   wins the cascade over all of them for the same viewport.
+   ============================================================ */
+.mobile-topbar {
+  display: none;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+.sidebar-mobile-close {
+  display: none;
+}
+
+@media (max-width: 680px) {
+  .app-shell,
+  .app-shell.sidebar-is-collapsed {
+    display: block;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+    background: var(--bg);
+  }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    padding: 12px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .mobile-nav-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--surface-soft);
+    color: var(--ink);
+  }
+
+  .mobile-topbar-title {
+    font-weight: 900;
+    font-size: 15px;
+    color: var(--ink);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 20, 12, 0.45);
+    z-index: 40;
+  }
+
+  .sidebar,
+  .sidebar-is-collapsed .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: min(280px, 82vw);
+    height: 100vh;
+    z-index: 50;
+    padding: 16px 12px;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.18);
+  }
+
+  .app-shell.mobile-nav-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .brand-mark {
+    align-items: center;
+  }
+
+  .sidebar-mobile-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    margin-left: auto;
+    flex: 0 0 auto;
+    color: inherit;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+  }
+
+  .sidebar-is-collapsed .brand-copy,
+  .sidebar-is-collapsed .nav-label,
+  .brand-copy,
+  .nav-label {
+    width: auto;
+    opacity: 1;
+  }
+
+  .sidebar-toggle,
+  .sidebar-footer .sidebar-toggle {
+    display: none !important;
+  }
+
+  .main-nav,
+  .sidebar-is-collapsed .main-nav {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+
+  .nav-group {
+    display: block;
+  }
+
+  .nav-section-label {
+    display: block;
+  }
+
+  .nav-button,
+  .sidebar-is-collapsed .nav-button {
+    width: 100%;
+    justify-content: flex-start;
+    white-space: normal;
+  }
+
+  .workspace {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    padding: 14px;
+  }
+
+  .workspace > section {
+    max-width: none;
+  }
+
+  .period-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .period-toggle,
+  .period-nav {
+    max-width: none;
+  }
+
+  .payment-method-stats {
+    grid-template-columns: 1fr;
+  }
+}

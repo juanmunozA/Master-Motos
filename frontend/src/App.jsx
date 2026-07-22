@@ -11,6 +11,7 @@ import {
   Landmark,
   Layers,
   LogOut,
+  Menu,
   Plus,
   ReceiptText,
   Trash2,
@@ -19,6 +20,7 @@ import {
   Users,
   WalletCards,
   Wrench,
+  X,
 } from "lucide-react";
 import {
   Area,
@@ -538,6 +540,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem("masterMotosSidebarCollapsed") === "true",
   );
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const currentInvoiceNumber = useMemo(
     () => nextInvoiceNumber(invoices, meta),
@@ -1580,17 +1583,39 @@ export default function App() {
     );
   }
 
+  function navigateAndCloseMobile(view) {
+    showView(view);
+    setMobileNavOpen(false);
+  }
+
   return (
     <>
-      <div className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
+      <div
+        className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""} ${mobileNavOpen ? "mobile-nav-open" : ""}`}
+      >
+        <div className="mobile-topbar">
+          <button
+            type="button"
+            className="mobile-nav-toggle"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Abrir menu"
+          >
+            <Menu size={22} strokeWidth={2.4} />
+          </button>
+          <span className="mobile-topbar-title">Master Motos</span>
+        </div>
+        {mobileNavOpen && (
+          <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} />
+        )}
         <Sidebar
           activeView={activeView}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
-          showView={showView}
+          showView={navigateAndCloseMobile}
           role={role}
           authDisplayName={authStatus === "authenticated" ? authDisplayName : ""}
           onLogout={authStatus === "authenticated" ? handleLogout : null}
+          onCloseMobile={() => setMobileNavOpen(false)}
         />
         <main className="workspace">
           {activeView === views.dashboard && (
@@ -1737,7 +1762,7 @@ export default function App() {
   );
 }
 
-function Sidebar({ activeView, collapsed, setCollapsed, showView, role, authDisplayName, onLogout }) {
+function Sidebar({ activeView, collapsed, setCollapsed, showView, role, authDisplayName, onLogout, onCloseMobile }) {
   const isAdmin = role === "admin";
   const operationItems = [
     [Gauge, "Dashboard", views.dashboard],
@@ -1774,6 +1799,16 @@ function Sidebar({ activeView, collapsed, setCollapsed, showView, role, authDisp
           <strong>Master Motos</strong>
           <span>Medellin</span>
         </div>
+        {onCloseMobile && (
+          <button
+            type="button"
+            className="sidebar-mobile-close"
+            onClick={onCloseMobile}
+            aria-label="Cerrar menu"
+          >
+            <X size={20} strokeWidth={2.4} />
+          </button>
+        )}
       </div>
       <nav className="main-nav" aria-label="Principal">
         <div className="nav-group">
