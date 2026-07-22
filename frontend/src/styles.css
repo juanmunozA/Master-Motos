@@ -4170,7 +4170,9 @@ input[readonly],
     top: 0;
     left: 0;
     width: min(280px, 82vw);
-    height: 100vh;
+    height: auto;
+    max-height: 100vh;
+    overflow-y: auto;
     z-index: 50;
     padding: 16px 12px;
     transform: translateX(-100%);
@@ -4218,6 +4220,13 @@ input[readonly],
     display: flex;
     flex-direction: column;
     flex-wrap: nowrap;
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .sidebar-footer {
+    flex: 0 0 auto;
+    margin-top: 10px;
   }
 
   .nav-group {
