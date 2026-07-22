@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.local
+dist/
+*.log
+backend/data/*.csv
+backend/data/*.xls
+
+# Local dev/backup clutter, not part of the app
+.desktop-profile/
+zip claude/
+zip claude.zip
+legacy/
+/Aplicativo Deison/
+frontend/src/*.as.jsx
+frontend/src/*.asa.css

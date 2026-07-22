@@ -1,0 +1,29 @@
+{
+  "name": "master-motos-facturacion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplicativo local de facturacion, ingresos e inventario para Master Motos Medellin.",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "node backend/server.js",
+    "client": "vite --config frontend/vite.config.js --host 127.0.0.1",
+    "build": "vite build --config frontend/vite.config.js",
+    "preview": "node backend/server.js",
+    "migrate:pg": "node backend/scripts/migrate-csv-to-postgres.js",
+    "hash-password": "node backend/scripts/hash-password.js",
+    "check": "node --check backend/server.js && node --check backend/src/app.js && node --check backend/src/config/env.js && node --check backend/src/config/database.js && node --check backend/src/config/paths.js && node --check backend/src/controllers/dataController.js && node --check backend/src/controllers/authController.js && node --check backend/src/controllers/userController.js && node --check backend/src/models/workshopDataModel.js && node --check backend/src/repositories/csvRepository.js && node --check backend/src/repositories/postgresRepository.js && node --check backend/src/repositories/userRepository.js && node --check backend/src/routes/apiRoutes.js && node --check backend/src/routes/staticRoutes.js && node --check backend/src/services/excelBackupService.js && node --check backend/src/services/sessionService.js && node --check backend/src/utils/dataShape.js && node --check backend/src/utils/http.js && node --check backend/src/utils/password.js && node --check backend/scripts/migrate-csv-to-postgres.js && node --check backend/scripts/hash-password.js && vite build --config frontend/vite.config.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
+    "lucide-react": "^1.24.0",
+    "pg": "^8.22.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^3.10.0",
+    "vite": "^6.0.7"
+  }
+}
