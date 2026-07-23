@@ -682,9 +682,17 @@ export default function App() {
 
   useEffect(() => {
     if (activeView === views.users && role === "admin") {
-      loadUsers().catch((error) => showAlert(`No se pudo cargar la lista de usuarios: ${error.message}`));
+      loadUsers().catch((error) => handleActionError(error, "No se pudo cargar la lista de usuarios"));
     }
   }, [activeView, role]);
+
+  function handleActionError(error, contextMessage) {
+    if (error instanceof AuthRequiredError) {
+      setAuthStatus("required");
+      return;
+    }
+    showAlert(`${contextMessage}: ${error.message}`);
+  }
 
   async function handleLogin(username, password) {
     setLoginSubmitting(true);
@@ -1174,6 +1182,7 @@ export default function App() {
 
   async function loadUsers() {
     const response = await fetch("/api/users", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) throw new AuthRequiredError();
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "No se pudo cargar la lista de usuarios.");
     setUsers(data.users || []);
@@ -1186,6 +1195,7 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password, displayName, role: newRole }),
     });
+    if (response.status === 401) throw new AuthRequiredError();
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "No se pudo crear el usuario.");
     await loadUsers();
@@ -1197,6 +1207,7 @@ export default function App() {
       method: "DELETE",
       credentials: "same-origin",
     });
+    if (response.status === 401) throw new AuthRequiredError();
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "No se pudo eliminar el usuario.");
     await loadUsers();
@@ -1640,8 +1651,8 @@ export default function App() {
               removeItem={removeInvoiceItem}
               addPayment={addInvoicePayment}
               removePayment={removeInvoicePayment}
-              saveInvoice={() => saveInvoice().catch((error) => showAlert(`No se guardo la factura: ${error.message}`))}
-              printInvoice={() => printCurrentInvoice().catch((error) => showAlert(`No se pudo imprimir la factura: ${error.message}`))}
+              saveInvoice={() => saveInvoice().catch((error) => handleActionError(error, "No se guardo la factura"))}
+              printInvoice={() => printCurrentInvoice().catch((error) => handleActionError(error, "No se pudo imprimir la factura"))}
               invoiceRecordExists={invoiceRecordExists}
               invoiceIsDirty={invoiceIsDirty}
             />
@@ -1661,9 +1672,9 @@ export default function App() {
               order={order}
               invoices={invoices}
               setOrder={setOrder}
-              createInvoiceFromOrder={() => invoiceCurrentOrder().catch((error) => showAlert(`No se pudo crear la factura: ${error.message}`))}
-              saveOrder={() => saveOrder().catch((error) => showAlert(`No se guardo la orden: ${error.message}`))}
-              printOrder={() => printCurrentOrder().catch((error) => showAlert(`No se pudo imprimir la orden: ${error.message}`))}
+              createInvoiceFromOrder={() => invoiceCurrentOrder().catch((error) => handleActionError(error, "No se pudo crear la factura"))}
+              saveOrder={() => saveOrder().catch((error) => handleActionError(error, "No se guardo la orden"))}
+              printOrder={() => printCurrentOrder().catch((error) => handleActionError(error, "No se pudo imprimir la orden"))}
               orderRecordExists={orderRecordExists}
               orderIsDirty={orderIsDirty}
               role={role}
@@ -1680,7 +1691,7 @@ export default function App() {
               openOrder={openOrder}
               createInvoiceFromOrder={startInvoiceFromOrder}
               openInvoiceFromOrder={openInvoiceFromOrder}
-              updateOrderStatus={(item, status) => updateOrderStatus(item, status).catch((error) => showAlert(`No se actualizo el estado: ${error.message}`))}
+              updateOrderStatus={(item, status) => updateOrderStatus(item, status).catch((error) => handleActionError(error, "No se actualizo el estado"))}
               startNewOrder={startNewOrder}
               role={role}
             />
@@ -1692,9 +1703,9 @@ export default function App() {
               parts={filteredParts}
               query={inventoryQuery}
               setQuery={setInventoryQuery}
-              savePart={() => savePart().catch((error) => showAlert(`No se guardo el repuesto: ${error.message}`))}
+              savePart={() => savePart().catch((error) => handleActionError(error, "No se guardo el repuesto"))}
               editPart={editPart}
-              deletePart={(id) => deletePart(id).catch((error) => showAlert(`No se elimino el repuesto: ${error.message}`))}
+              deletePart={(id) => deletePart(id).catch((error) => handleActionError(error, "No se elimino el repuesto"))}
               partFormIsDirty={partFormIsDirty}
             />
           )}
@@ -1705,15 +1716,25 @@ export default function App() {
               meta={meta}
               setMeta={setMeta}
               nextInvoice={currentInvoiceNumber}
-              saveSettings={() => saveSettings().catch((error) => showAlert(`No se guardo la configuracion: ${error.message}`))}
+              saveSettings={() => saveSettings().catch((error) => handleActionError(error, "No se guardo la configuracion"))}
               settingsIsDirty={settingsIsDirty}
             />
           )}
           {activeView === views.users && role === "admin" && (
             <UsersView
               users={users}
-              onCreate={createUserAccount}
-              onDelete={(id) => deleteUserAccount(id).catch((error) => showAlert(`No se elimino el usuario: ${error.message}`))}
+              onCreate={async (form) => {
+                try {
+                  await createUserAccount(form);
+                } catch (error) {
+                  if (error instanceof AuthRequiredError) {
+                    setAuthStatus("required");
+                    return;
+                  }
+                  throw error;
+                }
+              }}
+              onDelete={(id) => deleteUserAccount(id).catch((error) => handleActionError(error, "No se elimino el usuario"))}
             />
           )}
           {activeView === views.statistics && role === "admin" && (
