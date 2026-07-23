@@ -11,6 +11,7 @@ import {
   Landmark,
   Layers,
   LogOut,
+  Loader2,
   Menu,
   Plus,
   ReceiptText,
@@ -309,6 +310,9 @@ function escapeHtml(value) {
 
 const monthShortNames = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
+// Cuantos registros se pintan de una en las listas largas antes de "Mostrar mas".
+const LIST_PAGE_SIZE = 40;
+
 const statsPeriods = [
   ["day", "Diario"],
   ["week", "Semanal"],
@@ -536,11 +540,13 @@ export default function App() {
   const [inventoryQuery, setInventoryQuery] = useState("");
   const [printMarkup, setPrintMarkup] = useState("");
   const [savePrompt, setSavePrompt] = useState(null);
+  const [quickPayment, setQuickPayment] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem("masterMotosSidebarCollapsed") === "true",
   );
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [savingAction, setSavingAction] = useState(null);
 
   const currentInvoiceNumber = useMemo(
     () => nextInvoiceNumber(invoices, meta),
@@ -692,6 +698,18 @@ export default function App() {
       return;
     }
     showAlert(`${contextMessage}: ${error.message}`);
+  }
+
+  async function runSavingAction(key, action, errorContext) {
+    setSavingAction(key);
+    try {
+      return await action();
+    } catch (error) {
+      handleActionError(error, errorContext);
+      return null;
+    } finally {
+      setSavingAction(null);
+    }
   }
 
   async function handleLogin(username, password) {
@@ -995,6 +1013,58 @@ export default function App() {
     setTimeout(() => window.print(), 0);
   }
 
+  function openQuickPayment(targetInvoice) {
+    setQuickPayment({ invoice: targetInvoice, amount: "", date: today() });
+  }
+
+  async function registerQuickPayment(targetInvoice, rawAmount, rawDate) {
+    if (!storageReady) throw new Error("La base local no esta lista.");
+    const amount = Number(rawAmount) || 0;
+    const currentPayments = normalizePayments(targetInvoice);
+    const totals = calculateTotals(targetInvoice.items || [], currentPayments);
+    if (amount <= 0) {
+      await showAlert("Ingresa un valor de abono mayor a cero.");
+      return false;
+    }
+    if (totals.balance <= 0) {
+      await showAlert("Esta factura ya esta pagada.");
+      return false;
+    }
+    if (amount > totals.balance) {
+      await showAlert(`El abono no puede superar el saldo pendiente de ${formatMoney(totals.balance)}.`);
+      return false;
+    }
+
+    const nextPayments = [...currentPayments, { id: createId("payment"), date: rawDate || today(), amount }];
+    const updatedInvoice = {
+      ...targetInvoice,
+      payments: nextPayments,
+      totals: calculateTotals(targetInvoice.items || [], nextPayments),
+    };
+    const nextInvoices = invoices.map((item) => (item.id === targetInvoice.id ? updatedInvoice : item));
+
+    await persistStorage(dataPayload({ invoices: nextInvoices }));
+    setInvoices(nextInvoices);
+    // Si la factura abierta en el formulario es la misma, refrescala.
+    if (invoice.id === targetInvoice.id) {
+      const refreshed = invoiceFromStored(updatedInvoice);
+      setInvoice(refreshed);
+      setInvoiceBaseline(refreshed);
+    }
+    return true;
+  }
+
+  async function confirmQuickPayment() {
+    if (!quickPayment) return;
+    const { invoice: target, amount, date } = quickPayment;
+    const ok = await runSavingAction(
+      "quickPayment",
+      () => registerQuickPayment(target, amount, date),
+      "No se pudo registrar el abono",
+    );
+    if (ok) setQuickPayment(null);
+  }
+
   function dismissSavePrompt() {
     if (!savePrompt) return;
     const target = savePrompt.type === "order" ? views.orders : views.invoices;
@@ -1084,27 +1154,30 @@ export default function App() {
       return;
     }
 
-    const nextOrders = orders.map((item) => {
-      if (item.id !== sourceOrder.id && Number(item.orderNumber) !== Number(sourceOrder.orderNumber)) return item;
-      return {
-        ...item,
-        status: nextStatus,
-        invoiceNumber: nextStatus === "invoiced" ? relatedInvoice?.invoiceNumber || item.invoiceNumber || "" : "",
-        invoicedAt: nextStatus === "invoiced" ? relatedInvoice?.invoiceDate || item.invoicedAt || "" : "",
-      };
+    const matches = (item) =>
+      item.id === sourceOrder.id || Number(item.orderNumber) === Number(sourceOrder.orderNumber);
+    const applyStatus = (item) => ({
+      ...item,
+      status: nextStatus,
+      invoiceNumber: nextStatus === "invoiced" ? relatedInvoice?.invoiceNumber || item.invoiceNumber || "" : "",
+      invoicedAt: nextStatus === "invoiced" ? relatedInvoice?.invoiceDate || item.invoicedAt || "" : "",
     });
 
-    await persistStorage(dataPayload({ orders: nextOrders }));
+    const prevOrders = orders;
+    const prevOrder = order;
+    const nextOrders = orders.map((item) => (matches(item) ? applyStatus(item) : item));
+
+    // Optimista: la UI cambia de una vez y la red va por detras.
     setOrders(nextOrders);
-    setOrder((current) => {
-      if (current.id !== sourceOrder.id && Number(current.orderNumber) !== Number(sourceOrder.orderNumber)) return current;
-      return {
-        ...current,
-        status: nextStatus,
-        invoiceNumber: nextStatus === "invoiced" ? relatedInvoice?.invoiceNumber || current.invoiceNumber || "" : "",
-        invoicedAt: nextStatus === "invoiced" ? relatedInvoice?.invoiceDate || current.invoicedAt || "" : "",
-      };
-    });
+    setOrder((current) => (matches(current) ? applyStatus(current) : current));
+
+    try {
+      await persistStorage(dataPayload({ orders: nextOrders }));
+    } catch (error) {
+      setOrders(prevOrders);
+      setOrder(prevOrder);
+      throw error;
+    }
   }
 
   async function printCurrentOrder() {
@@ -1559,26 +1632,34 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
-  const filteredInvoices = invoices.filter((item) =>
-    [item.invoiceNumber, item.customerName, item.motorcycle, item.plate]
-      .join(" ")
-      .toLowerCase()
-      .includes(historyQuery.toLowerCase().trim()),
-  );
-  const filteredOrders = orders.filter((item) =>
-    [item.orderNumber, item.customerName, item.motorcycle, item.plate, item.attendant]
-      .join(" ")
-      .toLowerCase()
-      .includes(orderQuery.toLowerCase().trim()),
-  ).filter((item) => {
-    if (orderStatusFilter === "all") return true;
-    const hasInvoice = Boolean(findInvoiceForOrder(item, invoices));
-    const normalizedStatus = hasInvoice ? "invoiced" : item.status === "invoiced" ? "ready" : item.status || "received";
-    return normalizedStatus === orderStatusFilter;
-  });
-  const filteredParts = parts.filter((item) =>
-    [item.code, item.name].join(" ").toLowerCase().includes(inventoryQuery.toLowerCase().trim()),
-  );
+  const filteredInvoices = useMemo(() => {
+    const needle = historyQuery.toLowerCase().trim();
+    return invoices.filter((item) =>
+      [item.invoiceNumber, item.customerName, item.motorcycle, item.plate].join(" ").toLowerCase().includes(needle),
+    );
+  }, [invoices, historyQuery]);
+
+  const filteredOrders = useMemo(() => {
+    const needle = orderQuery.toLowerCase().trim();
+    return orders
+      .filter((item) =>
+        [item.orderNumber, item.customerName, item.motorcycle, item.plate, item.attendant]
+          .join(" ")
+          .toLowerCase()
+          .includes(needle),
+      )
+      .filter((item) => {
+        if (orderStatusFilter === "all") return true;
+        const hasInvoice = Boolean(findInvoiceForOrder(item, invoices));
+        const normalizedStatus = hasInvoice ? "invoiced" : item.status === "invoiced" ? "ready" : item.status || "received";
+        return normalizedStatus === orderStatusFilter;
+      });
+  }, [orders, invoices, orderQuery, orderStatusFilter]);
+
+  const filteredParts = useMemo(() => {
+    const needle = inventoryQuery.toLowerCase().trim();
+    return parts.filter((item) => [item.code, item.name].join(" ").toLowerCase().includes(needle));
+  }, [parts, inventoryQuery]);
 
   if (authStatus === "checking") {
     return <div className="auth-loading">Cargando...</div>;
@@ -1651,10 +1732,11 @@ export default function App() {
               removeItem={removeInvoiceItem}
               addPayment={addInvoicePayment}
               removePayment={removeInvoicePayment}
-              saveInvoice={() => saveInvoice().catch((error) => handleActionError(error, "No se guardo la factura"))}
-              printInvoice={() => printCurrentInvoice().catch((error) => handleActionError(error, "No se pudo imprimir la factura"))}
+              saveInvoice={() => runSavingAction("invoice", () => saveInvoice(), "No se guardo la factura")}
+              printInvoice={() => runSavingAction("printInvoice", () => printCurrentInvoice(), "No se pudo imprimir la factura")}
               invoiceRecordExists={invoiceRecordExists}
               invoiceIsDirty={invoiceIsDirty}
+              savingAction={savingAction}
             />
           )}
           {activeView === views.invoices && (
@@ -1663,6 +1745,7 @@ export default function App() {
               query={historyQuery}
               setQuery={setHistoryQuery}
               openInvoice={openInvoice}
+              onQuickPayment={openQuickPayment}
               exportExcel={exportExcel}
               startNewInvoice={startNewInvoice}
             />
@@ -1672,12 +1755,13 @@ export default function App() {
               order={order}
               invoices={invoices}
               setOrder={setOrder}
-              createInvoiceFromOrder={() => invoiceCurrentOrder().catch((error) => handleActionError(error, "No se pudo crear la factura"))}
-              saveOrder={() => saveOrder().catch((error) => handleActionError(error, "No se guardo la orden"))}
-              printOrder={() => printCurrentOrder().catch((error) => handleActionError(error, "No se pudo imprimir la orden"))}
+              createInvoiceFromOrder={() => runSavingAction("createInvoiceFromOrder", () => invoiceCurrentOrder(), "No se pudo crear la factura")}
+              saveOrder={() => runSavingAction("order", () => saveOrder(), "No se guardo la orden")}
+              printOrder={() => runSavingAction("printOrder", () => printCurrentOrder(), "No se pudo imprimir la orden")}
               orderRecordExists={orderRecordExists}
               orderIsDirty={orderIsDirty}
               role={role}
+              savingAction={savingAction}
             />
           )}
           {activeView === views.orders && (
@@ -1703,10 +1787,11 @@ export default function App() {
               parts={filteredParts}
               query={inventoryQuery}
               setQuery={setInventoryQuery}
-              savePart={() => savePart().catch((error) => handleActionError(error, "No se guardo el repuesto"))}
+              savePart={() => runSavingAction("part", () => savePart(), "No se guardo el repuesto")}
               editPart={editPart}
               deletePart={(id) => deletePart(id).catch((error) => handleActionError(error, "No se elimino el repuesto"))}
               partFormIsDirty={partFormIsDirty}
+              savingAction={savingAction}
             />
           )}
           {activeView === views.settings && (
@@ -1716,8 +1801,9 @@ export default function App() {
               meta={meta}
               setMeta={setMeta}
               nextInvoice={currentInvoiceNumber}
-              saveSettings={() => saveSettings().catch((error) => handleActionError(error, "No se guardo la configuracion"))}
+              saveSettings={() => runSavingAction("settings", () => saveSettings(), "No se guardo la configuracion")}
               settingsIsDirty={settingsIsDirty}
+              savingAction={savingAction}
             />
           )}
           {activeView === views.users && role === "admin" && (
@@ -1755,6 +1841,50 @@ export default function App() {
             <div className="modal-actions">
               <button className="primary-button" type="button" onClick={confirmSavePromptPrint}>Si, imprimir</button>
               <button className="ghost-button" type="button" onClick={dismissSavePrompt}>No</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {quickPayment && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-modal form-modal" role="dialog" aria-modal="true" aria-labelledby="quickPaymentTitle">
+            <span className="modal-kicker">Cobro rapido</span>
+            <h2 id="quickPaymentTitle">Registrar abono</h2>
+            <p>
+              Factura No. {quickPayment.invoice.invoiceNumber} - {quickPayment.invoice.customerName || "Sin cliente"}
+            </p>
+            <p className="quick-payment-balance">
+              Saldo pendiente: <strong>{formatMoney(quickPayment.invoice.totals?.balance)}</strong>
+            </p>
+            <div className="form-grid">
+              <Field label="Valor del abono">
+                <input
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={quickPayment.amount}
+                  autoFocus
+                  onChange={(event) => setQuickPayment((current) => ({ ...current, amount: event.target.value }))}
+                />
+              </Field>
+              <Field label="Fecha">
+                <input
+                  type="date"
+                  value={quickPayment.date}
+                  onChange={(event) => setQuickPayment((current) => ({ ...current, date: event.target.value }))}
+                />
+              </Field>
+            </div>
+            <div className="modal-actions">
+              <ActionButton
+                className="primary-button"
+                onClick={confirmQuickPayment}
+                loading={savingAction === "quickPayment"}
+                loadingLabel="Guardando..."
+              >
+                Guardar abono
+              </ActionButton>
+              <button className="ghost-button" type="button" onClick={() => setQuickPayment(null)} disabled={savingAction === "quickPayment"}>Cancelar</button>
             </div>
           </section>
         </div>
@@ -2088,7 +2218,7 @@ function Stat({ icon: Icon, label, value, className = "" }) {
   );
 }
 
-function InvoiceForm({ invoice, totals, parts, updateField, updateItem, addItem, removeItem, addPayment, removePayment, saveInvoice, printInvoice, invoiceRecordExists, invoiceIsDirty }) {
+function InvoiceForm({ invoice, totals, parts, updateField, updateItem, addItem, removeItem, addPayment, removePayment, saveInvoice, printInvoice, invoiceRecordExists, invoiceIsDirty, savingAction }) {
   const payments = normalizePayments(invoice);
   const canPrint = invoiceRecordExists && !invoiceIsDirty;
   return (
@@ -2099,15 +2229,16 @@ function InvoiceForm({ invoice, totals, parts, updateField, updateItem, addItem,
         description="Construye la factura con cliente, moto, repuestos, servicios y abonos."
         icon={ReceiptText}
       >
-        <button
+        <ActionButton
           className="ghost-button"
-          type="button"
           onClick={printInvoice}
           disabled={!canPrint}
+          loading={savingAction === "printInvoice"}
+          loadingLabel="Imprimiendo..."
           title={canPrint ? undefined : "Guarda la factura antes de imprimir"}
         >
           Imprimir
-        </button>
+        </ActionButton>
       </PageHeader>
       <form className="invoice-layout">
         <section className="panel">
@@ -2185,7 +2316,7 @@ function InvoiceForm({ invoice, totals, parts, updateField, updateItem, addItem,
               <Field label="Observaciones"><textarea value={invoice.observations} rows="4" onChange={(event) => updateField("observations", event.target.value)} /></Field>
             </div>
             <div className="invoice-bottom-actions">
-              <button className="primary-button invoice-action-button" type="button" onClick={saveInvoice} disabled={!invoiceIsDirty}>Guardar</button>
+              <ActionButton className="primary-button invoice-action-button" onClick={saveInvoice} disabled={!invoiceIsDirty} loading={savingAction === "invoice"}>Guardar</ActionButton>
             </div>
           </div>
           <div className="invoice-side-column">
@@ -2234,7 +2365,25 @@ function TotalRow({ label, value, className = "" }) {
   return <div className={`total-row ${className}`.trim()}><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function InvoiceHistory({ invoices, query, setQuery, openInvoice, exportExcel, startNewInvoice }) {
+function ActionButton({ loading = false, loadingLabel = "Guardando...", className = "", children, disabled = false, ...rest }) {
+  return (
+    <button className={className} type="button" disabled={loading || disabled} {...rest}>
+      {loading ? (
+        <span className="btn-loading">
+          <Loader2 size={16} className="btn-spin" />
+          {loadingLabel}
+        </span>
+      ) : (
+        children
+      )}
+    </button>
+  );
+}
+
+function InvoiceHistory({ invoices, query, setQuery, openInvoice, onQuickPayment, exportExcel, startNewInvoice }) {
+  const [visibleCount, setVisibleCount] = useState(LIST_PAGE_SIZE);
+  useEffect(() => setVisibleCount(LIST_PAGE_SIZE), [query, invoices.length]);
+  const visible = invoices.slice(0, visibleCount);
   return (
     <section className="module-view list-view invoices-view">
       <PageHeader
@@ -2251,34 +2400,42 @@ function InvoiceHistory({ invoices, query, setQuery, openInvoice, exportExcel, s
           <input value={query} type="search" placeholder="Buscar por cliente, placa o numero" onChange={(event) => setQuery(event.target.value)} />
         </div>
         <div className="history-list">
-          {invoices.length ? invoices.map((item) => (
-            (() => {
-              const balance = Number(item.totals?.balance) || 0;
-              return (
-                <article className="history-item" key={item.id}>
-                  <strong>No. {item.invoiceNumber}</strong>
-                  <div>
-                    <strong>{item.customerName} - {item.motorcycle}</strong>
-                    <span>{item.invoiceDate} - {item.plate || "Sin placa"} - Saldo {formatMoney(item.totals?.balance)}</span>
-                    <span className={balance > 0 ? "payment-note" : "status-pill status-paid"}>
-                      {balance > 0 ? `Debe ${formatMoney(balance)}` : "Pagada"}
-                    </span>
-                  </div>
-                  <div>
-                    <strong>{formatMoney(item.totals?.total)}</strong>
-                    <button className="small-button" type="button" onClick={() => openInvoice(item)}>Abrir</button>
-                  </div>
-                </article>
-              );
-            })()
-          )) : <p className="empty-state">Todavia no hay facturas guardadas.</p>}
+          {visible.length ? visible.map((item) => {
+            const balance = Number(item.totals?.balance) || 0;
+            return (
+              <article className="history-item" key={item.id}>
+                <strong>No. {item.invoiceNumber}</strong>
+                <div>
+                  <strong>{item.customerName} - {item.motorcycle}</strong>
+                  <span>{item.invoiceDate} - {item.plate || "Sin placa"} - Saldo {formatMoney(item.totals?.balance)}</span>
+                  <span className={balance > 0 ? "payment-note" : "status-pill status-paid"}>
+                    {balance > 0 ? `Debe ${formatMoney(balance)}` : "Pagada"}
+                  </span>
+                </div>
+                <div>
+                  <strong>{formatMoney(item.totals?.total)}</strong>
+                  {balance > 0 && (
+                    <button className="small-button small-button-accent" type="button" onClick={() => onQuickPayment(item)}>Abonar</button>
+                  )}
+                  <button className="small-button" type="button" onClick={() => openInvoice(item)}>Abrir</button>
+                </div>
+              </article>
+            );
+          }) : <p className="empty-state">Todavia no hay facturas guardadas.</p>}
         </div>
+        {invoices.length > visibleCount && (
+          <div className="list-more">
+            <button className="ghost-button" type="button" onClick={() => setVisibleCount((n) => n + LIST_PAGE_SIZE)}>
+              Mostrar mas ({invoices.length - visibleCount} restantes)
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function OrderForm({ order, invoices, setOrder, createInvoiceFromOrder, saveOrder, printOrder, orderRecordExists, orderIsDirty, role }) {
+function OrderForm({ order, invoices, setOrder, createInvoiceFromOrder, saveOrder, printOrder, orderRecordExists, orderIsDirty, role, savingAction }) {
   const relatedInvoice = findInvoiceForOrder(order, invoices);
   const statusOptions = relatedInvoice ? orderStatuses.filter(([value]) => value === "invoiced") : orderStatuses.filter(([value]) => value !== "invoiced");
   const selectedStatus = relatedInvoice ? "invoiced" : order.status === "invoiced" ? "ready" : order.status || "received";
@@ -2292,27 +2449,29 @@ function OrderForm({ order, invoices, setOrder, createInvoiceFromOrder, saveOrde
         description="Registra la entrada de la moto, responsable, motivo y observaciones."
         icon={ClipboardList}
       >
-        <button className="ghost-button" type="button" onClick={saveOrder} disabled={!orderIsDirty}>Guardar</button>
+        <ActionButton className="ghost-button" onClick={saveOrder} disabled={!orderIsDirty} loading={savingAction === "order"}>Guardar</ActionButton>
         {role === "admin" && (
-        <button
+        <ActionButton
           className="ghost-button"
-          type="button"
           onClick={createInvoiceFromOrder}
           disabled={!relatedInvoice && !canActOnSaved}
+          loading={savingAction === "createInvoiceFromOrder"}
+          loadingLabel="Abriendo..."
           title={!relatedInvoice && !canActOnSaved ? "Guarda la orden antes de facturar" : undefined}
         >
           {relatedInvoice ? "Ver factura" : "Facturar"}
-        </button>
+        </ActionButton>
         )}
-        <button
+        <ActionButton
           className="primary-button"
-          type="button"
           onClick={printOrder}
           disabled={!canActOnSaved}
+          loading={savingAction === "printOrder"}
+          loadingLabel="Imprimiendo..."
           title={canActOnSaved ? undefined : "Guarda la orden antes de imprimir"}
         >
           Imprimir
-        </button>
+        </ActionButton>
       </PageHeader>
       <form className="invoice-layout">
         <section className="panel">
@@ -2361,6 +2520,9 @@ function OrderHistory({
   startNewOrder,
   role,
 }) {
+  const [visibleCount, setVisibleCount] = useState(LIST_PAGE_SIZE);
+  useEffect(() => setVisibleCount(LIST_PAGE_SIZE), [query, statusFilter, orders.length]);
+  const visible = orders.slice(0, visibleCount);
   return (
     <section className="module-view list-view orders-view">
       <PageHeader
@@ -2380,7 +2542,7 @@ function OrderHistory({
           </select>
         </div>
         <div className="order-list">
-          {orders.length ? orders.map((item) => (
+          {visible.length ? visible.map((item) => (
             (() => {
               const billing = orderBillingState(item, invoices);
               const isInvoiced = Boolean(findInvoiceForOrder(item, invoices));
@@ -2419,12 +2581,19 @@ function OrderHistory({
             })()
           )) : <p className="empty-state">Todavia no hay ordenes de ingreso guardadas.</p>}
         </div>
+        {orders.length > visibleCount && (
+          <div className="list-more">
+            <button className="ghost-button" type="button" onClick={() => setVisibleCount((n) => n + LIST_PAGE_SIZE)}>
+              Mostrar mas ({orders.length - visibleCount} restantes)
+            </button>
+          </div>
+        )}
       </section>
     </section>
   );
 }
 
-function Inventory({ partForm, setPartForm, parts, query, setQuery, savePart, editPart, deletePart, partFormIsDirty }) {
+function Inventory({ partForm, setPartForm, parts, query, setQuery, savePart, editPart, deletePart, partFormIsDirty, savingAction }) {
   const update = (field, value) => setPartForm((current) => ({ ...current, [field]: value }));
   return (
     <section className="module-view inventory-view">
@@ -2434,7 +2603,7 @@ function Inventory({ partForm, setPartForm, parts, query, setQuery, savePart, ed
         description="Administra codigos, precios de venta y existencias disponibles."
         icon={Boxes}
       >
-        <button className="primary-button" type="button" onClick={savePart} disabled={!partFormIsDirty}>Guardar repuesto</button>
+        <ActionButton className="primary-button" onClick={savePart} disabled={!partFormIsDirty} loading={savingAction === "part"}>Guardar repuesto</ActionButton>
       </PageHeader>
       <section className="panel inventory-editor">
         <div className="panel-title">
@@ -2472,7 +2641,7 @@ function Inventory({ partForm, setPartForm, parts, query, setQuery, savePart, ed
   );
 }
 
-function Settings({ settings, setSettings, meta, setMeta, nextInvoice, saveSettings, settingsIsDirty }) {
+function Settings({ settings, setSettings, meta, setMeta, nextInvoice, saveSettings, settingsIsDirty, savingAction }) {
   const update = (field, value) => setSettings((current) => ({ ...current, [field]: value }));
   return (
     <section className="module-view settings-view">
@@ -2482,7 +2651,7 @@ function Settings({ settings, setSettings, meta, setMeta, nextInvoice, saveSetti
         description="Controla los datos legales, contacto, cuenta bancaria y consecutivo."
         icon={Wrench}
       >
-        <button className="primary-button" type="button" onClick={saveSettings} disabled={!settingsIsDirty}>Guardar datos</button>
+        <ActionButton className="primary-button" onClick={saveSettings} disabled={!settingsIsDirty} loading={savingAction === "settings"}>Guardar datos</ActionButton>
       </PageHeader>
       <section className="panel">
         <div className="panel-title">

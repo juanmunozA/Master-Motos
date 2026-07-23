@@ -4269,3 +4269,44 @@ input[readonly],
     grid-template-columns: 1fr;
   }
 }
+
+/* Spinner de feedback en botones de accion (guardar/imprimir/abono). */
+.btn-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-spin {
+  animation: btn-spin 0.7s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Boton "Mostrar mas" al pie de listas largas. */
+.list-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+/* Boton "Abonar" resaltado en la lista de facturas con saldo. */
+.small-button-accent {
+  color: #ffffff;
+  background: var(--green-dark);
+  border-color: var(--green-dark);
+}
+
+.small-button-accent:hover {
+  filter: brightness(1.05);
+}
+
+/* Modal de abono rapido. */
+.quick-payment-balance {
+  margin-top: -4px;
+  color: var(--muted);
+}
