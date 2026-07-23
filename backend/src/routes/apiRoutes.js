@@ -20,7 +20,7 @@ function requireAuth(request, response) {
 async function handleApiRoute(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
-  if (url.pathname === "/api/health" && request.method === "GET") {
+  if (url.pathname === "/api/health" && (request.method === "GET" || request.method === "HEAD")) {
     health(request, response);
     return;
   }
